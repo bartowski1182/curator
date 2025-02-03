@@ -233,7 +233,10 @@ class OpenAIOnlineRequestProcessor(BaseOnlineRequestProcessor, OpenAIRequestMixi
                 total_tokens=usage["total_tokens"],
             )
 
-            cost = self.completion_cost(response)
+            try:
+                cost = self.completion_cost(response)
+            except Exception as e:
+                cost = 0.0
 
             # Create and return response
             return GenericResponse(
