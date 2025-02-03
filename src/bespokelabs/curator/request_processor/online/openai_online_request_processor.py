@@ -205,6 +205,7 @@ class OpenAIOnlineRequestProcessor(BaseOnlineRequestProcessor, OpenAIRequestMixi
             json=request.api_specific_request,
             timeout=self.config.request_timeout,
         ) as response_obj:
+            logger.warning("in session post")
             response = await response_obj.json()
 
             if "error" in response:
@@ -221,10 +222,13 @@ class OpenAIOnlineRequestProcessor(BaseOnlineRequestProcessor, OpenAIRequestMixi
             if response_obj.status != 200:
                 raise Exception(f"API request failed with status {response_obj.status}: {response}")
 
+            logger.warning("200 returned")
             if self.config.return_completions_object:
                 response_message = dict(response)
             else:
                 response_message = response["choices"][0]["message"]["content"]
+
+            logger.warning("response extracted")
             finish_reason = response["choices"][0].get("finish_reason", "unkown")
             usage = response["usage"]
             token_usage = TokenUsage(
@@ -232,11 +236,13 @@ class OpenAIOnlineRequestProcessor(BaseOnlineRequestProcessor, OpenAIRequestMixi
                 completion_tokens=usage["completion_tokens"],
                 total_tokens=usage["total_tokens"],
             )
+            logger.warning("token usage acquired")
 
             try:
                 cost = self.completion_cost(response)
             except Exception as e:
                 cost = 0.0
+            logger.warning("cost completion assigned")
 
             # Create and return response
             return GenericResponse(
