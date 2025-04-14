@@ -16,13 +16,20 @@ from dataclasses import dataclass, field
 
 import aiofiles
 import aiohttp
+import httpx
 
 from bespokelabs.curator.llm.prompt_formatter import PromptFormatter
 from bespokelabs.curator.request_processor import _DEFAULT_COST_MAP
-from bespokelabs.curator.request_processor.base_request_processor import BaseRequestProcessor
+from bespokelabs.curator.request_processor.base_request_processor import (
+    BaseRequestProcessor,
+)
 from bespokelabs.curator.request_processor.config import OnlineRequestProcessorConfig
 from bespokelabs.curator.request_processor.event_loop import run_in_event_loop
-from bespokelabs.curator.status_tracker.online_status_tracker import OnlineStatusTracker, TokenLimitStrategy, _TokenCount
+from bespokelabs.curator.status_tracker.online_status_tracker import (
+    OnlineStatusTracker,
+    TokenLimitStrategy,
+    _TokenCount,
+)
 from bespokelabs.curator.types.generic_request import GenericRequest
 from bespokelabs.curator.types.generic_response import GenericResponse
 
@@ -75,7 +82,9 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
         self.manual_max_tokens_per_minute = config.max_tokens_per_minute
         self.default_max_requests_per_minute = defaults["max_requests_per_minute"]
         self.default_max_concurrent_requests = defaults["max_concurrent_requests"]
-        self.default_max_tokens_per_minute = defaults["max_tokens_per_minute"][self.token_limit_strategy.value]
+        self.default_max_tokens_per_minute = defaults["max_tokens_per_minute"][
+            self.token_limit_strategy.value
+        ]
         self.header_based_max_requests_per_minute = None
         self.header_based_max_tokens_per_minute = None
 
@@ -87,7 +96,9 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
         self._output_tokens_window = deque(maxlen=_MAX_OUTPUT_MVA_WINDOW)
         self._semaphore = None
         if self.max_concurrent_requests is not None:
-            self._semaphore = asyncio.Semaphore(t.cast(int, self.max_concurrent_requests))
+            self._semaphore = asyncio.Semaphore(
+                t.cast(int, self.max_concurrent_requests)
+            )
 
     @property
     def backend(self) -> str:
@@ -102,11 +113,15 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
         or uses default value as last resort.
         """
         if self.manual_max_concurrent_requests:
-            logger.info(f"Manually set max_concurrent_requests to {self.manual_max_concurrent_requests}")
+            logger.info(
+                f"Manually set max_concurrent_requests to {self.manual_max_concurrent_requests}"
+            )
             return self.manual_max_concurrent_requests
 
         elif self.header_based_max_concurrent_requests:
-            logger.info(f"Automatically set max_concurrent_requests to {self.header_based_max_concurrent_requests}")
+            logger.info(
+                f"Automatically set max_concurrent_requests to {self.header_based_max_concurrent_requests}"
+            )
             return self.header_based_max_concurrent_requests
         else:
             return None
@@ -119,10 +134,14 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
         or uses default value as last resort.
         """
         if self.manual_max_requests_per_minute:
-            logger.info(f"Manually set max_requests_per_minute to {self.manual_max_requests_per_minute}")
+            logger.info(
+                f"Manually set max_requests_per_minute to {self.manual_max_requests_per_minute}"
+            )
             return self.manual_max_requests_per_minute
         elif self.header_based_max_requests_per_minute:
-            logger.info(f"Automatically set max_requests_per_minute to {self.header_based_max_requests_per_minute}")
+            logger.info(
+                f"Automatically set max_requests_per_minute to {self.header_based_max_requests_per_minute}"
+            )
             return self.header_based_max_requests_per_minute
         else:
             logger.warning(
@@ -138,10 +157,14 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
         or uses default value as last resort.
         """
         if self.manual_max_tokens_per_minute:
-            logger.info(f"Manually set max_tokens_per_minute to {self.manual_max_tokens_per_minute}")
+            logger.info(
+                f"Manually set max_tokens_per_minute to {self.manual_max_tokens_per_minute}"
+            )
             return self.manual_max_tokens_per_minute
         elif self.header_based_max_tokens_per_minute:
-            logger.info(f"Automatically set max_tokens_per_minute to {self.header_based_max_tokens_per_minute}")
+            logger.info(
+                f"Automatically set max_tokens_per_minute to {self.header_based_max_tokens_per_minute}"
+            )
             return self.header_based_max_tokens_per_minute
         else:
             logger.warning(
@@ -171,7 +194,9 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
         pass
 
     @abstractmethod
-    def create_api_specific_request_online(self, generic_request: GenericRequest) -> dict:
+    def create_api_specific_request_online(
+        self, generic_request: GenericRequest
+    ) -> dict:
         """Create an API-specific request body from a generic request body.
 
         Args:
@@ -213,15 +238,21 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
                 )
             )
 
-    async def cool_down_if_rate_limit_error(self, status_tracker: OnlineStatusTracker) -> None:
+    async def cool_down_if_rate_limit_error(
+        self, status_tracker: OnlineStatusTracker
+    ) -> None:
         """Pause processing if a rate limit error is detected.
 
         Args:
             status_tracker: Tracker containing rate limit status
         """
         seconds_to_pause_on_rate_limit = self.config.seconds_to_pause_on_rate_limit
-        seconds_since_rate_limit_error = time.time() - status_tracker.time_of_last_rate_limit_error
-        remaining_seconds_to_pause = seconds_to_pause_on_rate_limit - seconds_since_rate_limit_error
+        seconds_since_rate_limit_error = (
+            time.time() - status_tracker.time_of_last_rate_limit_error
+        )
+        remaining_seconds_to_pause = (
+            seconds_to_pause_on_rate_limit - seconds_since_rate_limit_error
+        )
         if remaining_seconds_to_pause > 0:
             logger.warn(f"Pausing for {int(remaining_seconds_to_pause)} seconds")
             await asyncio.sleep(remaining_seconds_to_pause)
@@ -234,7 +265,8 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
         generic_request_filepath: str,
         response_file: str,
     ) -> None:
-        """Processes API requests in parallel, throttling to stay under rate limits.
+        """Processes API requests with limited concurrency to avoid overloading the API
+        while keeping it busy.
 
         Args:
             generic_request_filepath: Path to file containing requests
@@ -249,26 +281,34 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
         )
 
         completed_request_ids = self.validate_existing_response_file(response_file)
-        # Resume if a response file exists
 
-        # Count total requests
+        # Resume if a response file exists
         status_tracker.num_tasks_already_completed = len(completed_request_ids)
         status_tracker.total_requests = self.total_requests
         status_tracker.model = self.prompt_formatter.model_name
         status_tracker.start_tracker(self._tracker_console)
 
-        # Use higher connector limit for better throughput
-        tcp_limit = self.max_concurrent_requests if status_tracker.max_requests_per_minute is None else status_tracker.max_requests_per_minute
-        connector = aiohttp.TCPConnector(limit=10 * tcp_limit)
-        async with aiohttp.ClientSession(connector=connector) as session:
+        # Allow a small number of concurrent connections
+        # This provides enough parallelism to keep the server busy without flooding it
+        max_concurrent = 3  # Allow 3 concurrent requests
+        limits = httpx.Limits(max_connections=max_concurrent + 1)  # +1 for overhead
+
+        # Create a semaphore to limit concurrency
+        request_semaphore = asyncio.Semaphore(max_concurrent)
+
+        async with httpx.AsyncClient(limits=limits, http2=True) as session:
             async with aiofiles.open(generic_request_filepath) as file:
-                pending_requests = []
+                pending_requests = set()  # Initialize as a set instead of a list
+
                 async for line in file:
                     if self._semaphore:
                         await self._semaphore.acquire()
+
                     generic_request = GenericRequest.model_validate_json(line)
 
                     if generic_request.original_row_idx in completed_request_ids:
+                        if self._semaphore:
+                            self._semaphore.release()
                         continue
 
                     request = APIRequest(
@@ -286,40 +326,61 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
 
                     # Wait for capacity if needed
                     while not status_tracker.has_capacity(token_estimate):
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(0.3)  # Increased sleep time to reduce CPU usage
 
                     # Wait for rate limits cool down if needed
                     await self.cool_down_if_rate_limit_error(status_tracker)
 
                     # Consume capacity before making request
                     status_tracker.consume_capacity(token_estimate)
+
+                    # Create a task that acquires the semaphore before processing
+                    # and releases it after completion
+                    async def process_with_semaphore(req, blocked_tokens):
+                        async with request_semaphore:
+                            status_tracker.num_tasks_in_progress += 1
+                            try:
+                                await self.handle_single_request_with_retries(
+                                    request=req,
+                                    session=session,
+                                    retry_queue=queue_of_requests_to_retry,
+                                    response_file=response_file,
+                                    status_tracker=status_tracker,
+                                    blocked_capacity=blocked_tokens,
+                                )
+                            finally:
+                                status_tracker.num_tasks_in_progress -= 1
+
                     task = asyncio.create_task(
-                        self.handle_single_request_with_retries(
-                            request=request,
-                            session=session,
-                            retry_queue=queue_of_requests_to_retry,
-                            response_file=response_file,
-                            status_tracker=status_tracker,
-                            blocked_capacity=token_estimate,
-                        )
+                        process_with_semaphore(request, token_estimate)
                     )
-                    pending_requests.append(task)
-
+                    pending_requests.add(task)  # Use add() instead of append()
                     status_tracker.num_tasks_started += 1
-                    status_tracker.num_tasks_in_progress += 1
 
-            if pending_requests:
-                await asyncio.gather(*pending_requests)
+                    # If we have too many pending tasks, wait for some to complete
+                    # This prevents memory issues with extremely large request files
+                    if len(pending_requests) >= max_concurrent * 3:
+                        done, pending_requests = await asyncio.wait(
+                            pending_requests, 
+                            return_when=asyncio.FIRST_COMPLETED
+                        )
+                        # No need to convert back to list
 
-            # Process any remaining retries in the queue
+                # Wait for all pending requests to complete
+                if pending_requests:
+                    await asyncio.gather(*pending_requests)
+
+            # Process retries with the same limited concurrency approach
             pending_retries = set()
+
             while not queue_of_requests_to_retry.empty() or pending_retries:
                 # Process new items from the queue if we have capacity
-                if self._semaphore:
-                    await self._semaphore.acquire()
+                while not queue_of_requests_to_retry.empty() and len(pending_retries) < max_concurrent:
+                    if self._semaphore:
+                        await self._semaphore.acquire()
 
-                if not queue_of_requests_to_retry.empty():
                     retry_request = await queue_of_requests_to_retry.get()
+
                     if status_tracker.max_tokens_per_minute is not None:
                         token_estimate = self.estimate_total_tokens(retry_request.generic_request.messages)
                     else:
@@ -334,26 +395,24 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
 
                     # Wait for capacity if needed
                     while not status_tracker.has_capacity(token_estimate):
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(0.5)
 
                     # Consume capacity before making request
                     status_tracker.consume_capacity(token_estimate)
 
+                    # Process retry with semaphore
                     task = asyncio.create_task(
-                        self.handle_single_request_with_retries(
-                            request=retry_request,
-                            session=session,
-                            retry_queue=queue_of_requests_to_retry,
-                            response_file=response_file,
-                            status_tracker=status_tracker,
-                            blocked_capacity=token_estimate,
-                        )
+                        process_with_semaphore(retry_request, token_estimate)
                     )
-                    pending_retries.add(task)
+                    pending_retries.add(task)  # Use add() instead of append()
 
-                # Wait for some tasks to complete
+                # Wait for some tasks to complete if we have pending retries
                 if pending_retries:
-                    done, pending_retries = await asyncio.wait(pending_retries, timeout=0.1)
+                    done, pending_retries = await asyncio.wait(
+                        pending_retries,
+                        return_when=asyncio.FIRST_COMPLETED if not queue_of_requests_to_retry.empty() else asyncio.ALL_COMPLETED,
+                        timeout=0.5 if not queue_of_requests_to_retry.empty() else None
+                    )
 
         status_tracker.stop_tracker()
 
@@ -364,7 +423,12 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
         if status_tracker.num_tasks_failed > 0:
             logger.warning(f"{status_tracker.num_tasks_failed} / {status_tracker.num_tasks_started} requests failed. Errors logged to {response_file}.")
 
-    def _free_capacity(self, status_tracker: OnlineStatusTracker, used_capacity: "_TokenCount", blocked_capacity: "_TokenCount"):
+    def _free_capacity(
+        self,
+        status_tracker: OnlineStatusTracker,
+        used_capacity: "_TokenCount",
+        blocked_capacity: "_TokenCount",
+    ):
         if status_tracker.max_tokens_per_minute is not None:
             status_tracker.free_capacity(used_capacity, blocked_capacity)
 
@@ -405,14 +469,25 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
                 )
                 raise ValueError(f"finish_reason was {generic_response.finish_reason}")
 
-            status_tracker.update_stats(generic_response.token_usage, generic_response.response_cost)
+            status_tracker.update_stats(
+                generic_response.token_usage, generic_response.response_cost
+            )
 
             # Allows us to retry on responses that don't match the response format
-            self.prompt_formatter.response_to_response_format(generic_response.response_message)
+            self.prompt_formatter.response_to_response_format(
+                generic_response.response_message
+            )
 
             # Free the extra capacity blocked before request with actual consumed capacity.
-            used_capacity = _TokenCount(input=generic_response.token_usage.prompt_tokens, output=generic_response.token_usage.completion_tokens)
-            self._free_capacity(status_tracker, used_capacity=used_capacity, blocked_capacity=blocked_capacity)
+            used_capacity = _TokenCount(
+                input=generic_response.token_usage.prompt_tokens,
+                output=generic_response.token_usage.completion_tokens,
+            )
+            self._free_capacity(
+                status_tracker,
+                used_capacity=used_capacity,
+                blocked_capacity=blocked_capacity,
+            )
 
         except Exception as e:
             status_tracker.num_other_errors += 1
@@ -445,7 +520,9 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
                 status_tracker.num_tasks_failed += 1
             return
         else:
-            self._add_output_token_moving_window(generic_response.token_usage.completion_tokens)
+            self._add_output_token_moving_window(
+                generic_response.token_usage.completion_tokens
+            )
         finally:
             if self._semaphore:
                 self._semaphore.release()
@@ -460,13 +537,15 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
         self._output_tokens_window.append(tokens)
 
     def _output_tokens_moving_average(self):
-        return sum(self._output_tokens_window) / (len(self._output_tokens_window) or _MAX_OUTPUT_MVA_WINDOW)
+        return sum(self._output_tokens_window) / (
+            len(self._output_tokens_window) or _MAX_OUTPUT_MVA_WINDOW
+        )
 
     @abstractmethod
     async def call_single_request(
         self,
         request: APIRequest,
-        session: aiohttp.ClientSession,
+        session: httpx.AsyncClient,
         status_tracker: OnlineStatusTracker,
     ) -> GenericResponse:
         """Make a single API request without error handling.
@@ -484,7 +563,9 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
         """
         pass
 
-    async def append_generic_response(self, data: GenericResponse, filename: str) -> None:
+    async def append_generic_response(
+        self, data: GenericResponse, filename: str
+    ) -> None:
         """Append a response to a jsonl file with async file operations.
 
         Args:

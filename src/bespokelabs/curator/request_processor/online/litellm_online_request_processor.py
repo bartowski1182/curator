@@ -7,6 +7,7 @@ import aiohttp
 import instructor
 import litellm
 from pydantic import BaseModel
+import httpx
 
 from bespokelabs.curator.request_processor.config import OnlineRequestProcessorConfig
 from bespokelabs.curator.request_processor.event_loop import run_in_event_loop
@@ -292,7 +293,7 @@ class LiteLLMOnlineRequestProcessor(BaseOnlineRequestProcessor):
     async def call_single_request(
         self,
         request: APIRequest,
-        session: aiohttp.ClientSession,
+        session: httpx.AsyncClient,
         status_tracker: OnlineStatusTracker,
     ) -> GenericResponse:
         """Make a single request through LiteLLM.

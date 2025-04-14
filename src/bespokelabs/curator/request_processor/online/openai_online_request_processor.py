@@ -8,6 +8,7 @@ import aiohttp
 import litellm
 import requests
 import tiktoken
+import httpx
 
 from bespokelabs.curator.cost import cost_processor_factory
 from bespokelabs.curator.request_processor.config import OnlineRequestProcessorConfig
@@ -182,7 +183,7 @@ class OpenAIOnlineRequestProcessor(BaseOnlineRequestProcessor, OpenAIRequestMixi
     async def call_single_request(
         self,
         request: APIRequest,
-        session: aiohttp.ClientSession,
+        session: httpx.AsyncClient,
         status_tracker: OnlineStatusTracker,
     ) -> GenericResponse:
         """Make a single OpenAI API request.
@@ -199,58 +200,58 @@ class OpenAIOnlineRequestProcessor(BaseOnlineRequestProcessor, OpenAIRequestMixi
         if "/deployments" in self.url:  # Azure deployment
             request_header = {"api-key": f"{self.api_key}"}
 
-        async with session.post(
+        response_obj = await session.post(
             self.url,
             headers=request_header,
             json=request.api_specific_request,
             timeout=self.config.request_timeout,
-        ) as response_obj:
-            response = await response_obj.json()
+        )
+        response = response_obj.json()
 
-            if "error" in response:
-                status_tracker.num_api_errors += 1
-                error = response["error"]
-                if "rate limit" in error.get("message", "").lower():
-                    status_tracker.time_of_last_rate_limit_error = time.time()
-                    status_tracker.num_rate_limit_errors += 1
-                    status_tracker.num_api_errors -= 1
-                    # because handle_single_request_with_retries will double count otherwise
-                    status_tracker.num_other_errors -= 1
-                raise Exception(f"API error: {error}")
+        if "error" in response:
+            status_tracker.num_api_errors += 1
+            error = response["error"]
+            if "rate limit" in error.get("message", "").lower():
+                status_tracker.time_of_last_rate_limit_error = time.time()
+                status_tracker.num_rate_limit_errors += 1
+                status_tracker.num_api_errors -= 1
+                # because handle_single_request_with_retries will double count otherwise
+                status_tracker.num_other_errors -= 1
+            raise Exception(f"API error: {error}")
 
-            if response_obj.status != 200:
-                raise Exception(f"API request failed with status {response_obj.status}: {response}")
+        if response_obj.status_code != 200:
+            raise Exception(f"API request failed with status {response_obj.status_code}: {response}")
 
-            if self.config.return_completions_object:
-                response_message = dict(response)
-            else:
-                response_message = response["choices"][0]["message"]["content"]
-            finish_reason = response["choices"][0].get("finish_reason", "unkown")
-            usage = response["usage"]
-            token_usage = TokenUsage(
-                prompt_tokens=usage["prompt_tokens"],
-                completion_tokens=usage["completion_tokens"],
-                total_tokens=usage["total_tokens"],
-            )
+        if self.config.return_completions_object:
+            response_message = dict(response)
+        else:
+            response_message = response["choices"][0]["message"]["content"]
+        finish_reason = response["choices"][0].get("finish_reason", "unkown")
+        usage = response["usage"]
+        token_usage = TokenUsage(
+            prompt_tokens=usage["prompt_tokens"],
+            completion_tokens=usage["completion_tokens"],
+            total_tokens=usage["total_tokens"],
+        )
 
-            try:
-                cost = self.completion_cost(response)
-            except Exception as e:
-                cost = 0.0
+        try:
+            cost = self.completion_cost(response)
+        except Exception as e:
+            cost = 0.0
 
-            # Create and return response
-            return GenericResponse(
-                response_message=response_message,
-                response_errors=None,
-                raw_request=request.api_specific_request,
-                raw_response=response,
-                generic_request=request.generic_request,
-                created_at=request.created_at,
-                finished_at=datetime.datetime.now(),
-                token_usage=token_usage,
-                response_cost=cost,
-                finish_reason=finish_reason,
-            )
+        # Create and return response
+        return GenericResponse(
+            response_message=response_message,
+            response_errors=None,
+            raw_request=request.api_specific_request,
+            raw_response=response,
+            generic_request=request.generic_request,
+            created_at=request.created_at,
+            finished_at=datetime.datetime.now(),
+            token_usage=token_usage,
+            response_cost=cost,
+            finish_reason=finish_reason,
+        )
 
     def get_token_encoding(self) -> str:
         """Get the token encoding name for a given model."""
