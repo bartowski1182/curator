@@ -75,7 +75,6 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
     def __init__(self, config: OnlineRequestProcessorConfig):
         """Initialize the BaseOnlineRequestProcessor."""
         super().__init__(config)
-
         defaults = _DEFAULT_COST_MAP["online"]["default"]["ratelimit"]
         self.token_limit_strategy = TokenLimitStrategy.default
         self.manual_max_requests_per_minute = config.max_requests_per_minute
@@ -90,6 +89,8 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
 
         self.manual_max_concurrent_requests = config.max_concurrent_requests
         self.header_based_max_concurrent_requests = None
+
+        self.max_batch = config.max_batch
 
         # The rich.Console used for the status tracker, only set for testing
         self._tracker_console = None
@@ -290,7 +291,8 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
 
         # Allow a small number of concurrent connections
         # This provides enough parallelism to keep the server busy without flooding it
-        max_concurrent = 3  # Allow 3 concurrent requests
+        max_concurrent = self.max_batch
+        logger.info(f"setting max_concurrent to: {max_concurrent}")
         limits = httpx.Limits(max_connections=max_concurrent + 1)  # +1 for overhead
 
         # Create a semaphore to limit concurrency

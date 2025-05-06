@@ -61,7 +61,7 @@ class OpenAIOnlineRequestProcessor(BaseOnlineRequestProcessor, OpenAIRequestMixi
             self.api_key = self.config.api_key or os.getenv("DEEPSEEK_API_KEY")
         else:
             self.api_key = self.config.api_key or os.getenv("OPENAI_API_KEY")
-            self.header_based_max_requests_per_minute, self.header_based_max_tokens_per_minute = self.get_header_based_rate_limits()
+            self.header_based_max_requests_per_minute, self.header_based_max_tokens_per_minute = (0, 0)
         self.token_encoding = self.get_token_encoding()
 
     @property
