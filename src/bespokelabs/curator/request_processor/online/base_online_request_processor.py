@@ -457,6 +457,7 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
             blocked_capacity: Blocked token capacity
         """
         try:
+            start_time = time.time()
             generic_response = await self.call_single_request(
                 request=request,
                 session=session,
@@ -500,7 +501,8 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
                 logger.warning(
                     f"Encountered '{e.__class__.__name__}: {e}' during attempt "
                     f"{self.config.max_retries - request.attempts_left} of {self.config.max_retries} "
-                    f"while processing request {request.task_id}"
+                    f"while processing request {request.task_id} "
+                    f"in {time.time() - start_time} seconds"
                 )
                 retry_queue.put_nowait(request)
             else:
