@@ -497,6 +497,8 @@ class BaseOnlineRequestProcessor(BaseRequestProcessor, ABC):
             request.result.append(e)
 
             if request.attempts_left > 0:
+                if "ReadTimeout" in e.__class__.__name__:
+                    request.attempts_left -= 1
                 request.attempts_left -= 1
                 logger.warning(
                     f"Encountered '{e.__class__.__name__}: {e}' during attempt "
