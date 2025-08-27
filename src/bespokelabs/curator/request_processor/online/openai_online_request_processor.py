@@ -204,7 +204,7 @@ class OpenAIOnlineRequestProcessor(BaseOnlineRequestProcessor, OpenAIRequestMixi
             self.url,
             headers=request_header,
             json=request.api_specific_request,
-            timeout=1200,
+            timeout=self.config.request_timeout,
         )
         response = response_obj.json()
 
